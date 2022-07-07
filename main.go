@@ -2,80 +2,105 @@ package main
 
 import (
 	"bufio"
-	"downloadFile/config"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path"
 	"time"
 )
 
-func main() {
-	// load config
-	err := config.InitConfig()
+var (
+	server  = ""
+	tips    = ""
+	cfg     config
+	day     string
+	failure []string
+)
+
+// config
+type config struct {
+	Url   string   `json:"url"`
+	Files []string `json:"files"`
+}
+
+// init
+func init() {
+	failure = make([]string, 0)
+
+	rsp, err := http.Get(server)
 	if err != nil {
-		return
+		log.Println("get config error")
+		panic(err)
 	}
-	url := config.Conf.Url
-	fmt.Println(config.Conf.Title)
-	// get day
-	var day string
+	defer rsp.Body.Close()
+
+	if rsp.Header["Content-Type"][0] != "application/json; charset=utf-8" {
+		log.Println("get config error")
+	}
+
+	if err := json.NewDecoder(rsp.Body).Decode(&cfg); err != nil {
+		log.Println("jsom unmarshal error")
+	}
+	fmt.Println(cfg)
+	fmt.Println("")
+}
+
+func main() {
+	fmt.Println(tips)
 	fmt.Scanln(&day)
 	fmt.Printf("time.Now() = %+v\n\n", time.Now())
-	// set tasks
-	tasks := make(map[string]bool, 0)
-	for _, v := range config.Conf.Tasks {
-		tasks[v] = false
+
+	for _, v := range cfg.Files {
+		url := cfg.Url + "/" + day + "/" + v
+		dowload(url, v)
 	}
-	// begin
-	for i, v := range tasks {
-		if v == false {
-			dowload(url, day, i, tasks)
-		}
-	}
-	// check result
-	for _, v := range tasks {
-		if v == false {
-			fmt.Println("==== EOORR ====")
-			return
-		}
+
+	for _, v := range failure {
+		fmt.Printf("=== ERROR : %s ===", v)
 	}
 	fmt.Println("==== SUCCESS ====")
 }
 
-func dowload(url string, day string, name string, tasks map[string]bool) {
-	// http get
-	pres, err := http.Get(url + "/" + day + "/" + name)
+func dowload(url string, file string) {
+	pres, err := http.Get(url)
 	if err != nil {
-		fmt.Println("get ERROR " + day + " " + name)
-		panic(err)
+		failure = append(failure, file)
+		fmt.Printf("get %s ERROR\n", url)
+		return
 	}
 	defer pres.Body.Close()
-	// check if exist
-	if pres.Header["Content-Type"][0] != config.Conf.Type {
-		fmt.Println("dowload ERROR " + day + " " + name)
+
+	if pres.Header["Content-Type"][0] != "image/jpeg" {
+		failure = append(failure, file)
+		fmt.Printf("dowload %s ERROR\n", file)
 		return
 	}
-	// init
+
 	err = os.MkdirAll("./dowload", 0777)
 	if err != nil {
+		failure = append(failure, file)
+		fmt.Println("mkdir error ")
 		return
 	}
-	os.Remove("./dowload" + name)
-	pfile, err := os.Create("./dowload/" + name)
+	os.Remove("./dowload" + file)
+	pfile, err := os.Create("./dowload/" + file)
 	if err != nil {
-		fmt.Println("create ERROR " + day + " " + name)
-		panic(err)
+		failure = append(failure, file)
+		fmt.Printf("create %s ERROR\n", file)
+		return
 	}
-	// save
+
 	_, err = io.Copy(pfile, pres.Body)
 	if err != nil {
-		fmt.Println("copy ERROR " + day + " " + name)
-		panic(err)
+		failure = append(failure, file)
+		fmt.Printf("copy %s ERROR\n", file)
+		return
 	}
-	fmt.Println("dowload and write SUCCESS " + day + " " + name)
-	tasks[name] = true
+
+	fmt.Printf("dowload and write %s SUCCESS\n", file)
 }
 
 func dowload2(url string, term string, name string) {
